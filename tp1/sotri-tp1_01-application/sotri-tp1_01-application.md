@@ -35,15 +35,18 @@ Contiene el punto de entrada de la aplicación C (`main()`). Las responsabilidad
 
 | Función | Propósito |
 |---|---|
-| `HAL_Init()` | Inicializa la HAL, configura TIM1 como base de tiempo (reemplaza SysTick para la HAL) |
+| `HAL_Init()` | Inicializa la HAL; `HAL_MspInit()` activa SYSCFG/PWR y fija PendSV en prioridad NVIC 15; luego `HAL_InitTick()` configura TIM1 como base de tiempo (reemplaza SysTick para la HAL) |
 | `SystemClock_Config()` | Configura el PLL para obtener SYSCLK = 84 MHz |
 | `MX_GPIO_Init()` | Configura LED2 (salida) y botón B1 (entrada con flanco descendente) |
 | `MX_USART2_UART_Init()` | UART2 a 115200 bps, 8N1 |
-| `MX_TIM2_Init()` | Inicializa TIM2 como timer de aplicación (sin arrancarlo) |
-| `osThreadCreate()` | Crea la tarea FreeRTOS `defaultTask` (pila 128 words, prioridad normal) |
+| `MX_TIM2_Init()` | Configura TIM2 (prescaler=1, period=4199); vía `HAL_TIM_Base_MspInit()` activa TIM2_CLK y habilita TIM2_IRQn con prioridad NVIC = 5 |
+| `HAL_TIM_Base_Start_IT(&htim2)` | **Arranca TIM2** con interrupción de actualización (UEV) habilitada — `ulHighFrequencyTimerTicks++` cada 100 µs |
+| `app_init()` | Inicializa contadores globales, crea `task_btn` y `task_led` (pila 256 words, prioridad 1 cada una), inicializa DWT |
 | `osKernelStart()` | Arranca el scheduler de FreeRTOS — **nunca retorna** |
-| `StartDefaultTask()` | Cuerpo de la única tarea: llama `osDelay(1)` en bucle |
-| `HAL_TIM_PeriodElapsedCallback()` | Callback de desbordamiento de timer: sólo responde a TIM1 llamando `HAL_IncTick()` |
+| `StartDefaultTask()` | Guardada como fallback: bucle `osDelay(1)`. **No se crea en esta compilación** (`#ifdef _defaultTask_` no está definido) |
+| `HAL_TIM_PeriodElapsedCallback()` | Callback de desbordamiento: TIM1 → `HAL_IncTick()`; TIM2 → `ulHighFrequencyTimerTicks++` |
+| `configureTimerForRunTimeStats()` | Implementación real (no-`__weak`) en `main.c`: resetea `ulHighFrequencyTimerTicks = 0` al iniciar el scheduler |
+| `getRunTimeCounterValue()` | Implementación real (no-`__weak`) en `main.c`: retorna `ulHighFrequencyTimerTicks` al kernel FreeRTOS |
 
 ### 1.4 `stm32f4xx_it.c`
 
@@ -98,16 +101,16 @@ Soporte para estadísticas de runtime:
 
 ### 1.6 `freertos.c`
 
-Contiene las implementaciones de los hooks y funciones auxiliares de FreeRTOS generadas por STM32CubeIDE:
+`Core/Src/freertos.c` contiene los hooks y funciones auxiliares de FreeRTOS generados por STM32CubeIDE. Las marcadas como `__weak` son sobreescritas en el enlace por implementaciones reales ubicadas en `main.c` (runtime stats) y `app/src/freertos.c` (hooks de idle, tick y stack overflow):
 
-| Función | Atributo | Comportamiento |
-|---|---|---|
-| `configureTimerForRunTimeStats()` | `__weak` | Vacía — placeholder para configurar TIM2 como contador de runtime stats |
-| `getRunTimeCounterValue()` | `__weak` | Retorna 0 — placeholder para leer el contador de TIM2 |
-| `vApplicationIdleHook()` | `__weak` | Vacía — se ejecuta en cada iteración de la idle task |
-| `vApplicationTickHook()` | `__weak` | Vacía — se ejecuta en cada interrupción de SysTick |
-| `vApplicationStackOverflowHook()` | `__weak` | Vacía — se ejecuta al detectar desbordamiento de pila |
-| `vApplicationGetIdleTaskMemory()` | — | Provee memoria estática para la idle task (`xIdleTaskTCBBuffer`, `xIdleStack[128]`) |
+| Función | Atributo | Comportamiento en `Core/Src/freertos.c` | Sobreescrita por |
+|---|---|---|---|
+| `configureTimerForRunTimeStats()` | `__weak` | Vacía (stub) | `main.c` → `ulHighFrequencyTimerTicks = 0` |
+| `getRunTimeCounterValue()` | `__weak` | Retorna 0 (stub) | `main.c` → `return ulHighFrequencyTimerTicks` |
+| `vApplicationIdleHook()` | `__weak` | Vacía (stub) | `app/src/freertos.c` → `g_task_idle_cnt++` |
+| `vApplicationTickHook()` | `__weak` | Vacía (stub) | `app/src/freertos.c` → `g_app_tick_cnt++` |
+| `vApplicationStackOverflowHook()` | `__weak` | Vacía (stub) | `app/src/freertos.c` → `configASSERT(0)` |
+| `vApplicationGetIdleTaskMemory()` | — | Provee memoria estática para la idle task (`xIdleTaskTCBBuffer`, `xIdleStack[128]`) | No sobreescrita |
 
 ---
 
@@ -197,20 +200,31 @@ MAIN()
 ├─ D. MX_USART2_UART_Init()
 │     · USART2: 115200 bps, 8N1, sin control de flujo, oversampling ×16
 │
-├─ E. MX_TIM2_Init()
+├─ E. MX_TIM2_Init() → HAL_TIM_Base_Init() → HAL_TIM_Base_MspInit()
 │     · Instancia: TIM2 (bus APB1)
 │     · Reloj TIM2: APB1 prescaler = 2 > 1 → TIM2 clock = 2 × PCLK1 = 84 MHz
 │     · Prescaler = 2 − 1 = 1  → contador a 84 MHz / 2 = 42 MHz
 │     · Period    = 4200 − 1   → desborda cada 4200 cuentas
 │     · Frecuencia de desbordamiento = 42 MHz / 4200 = 10 000 Hz (100 µs)
 │     · Modo: conteo ascendente, sin preload de ARR
-│     · ¡TIM2 NO se arranca! (no hay llamada a HAL_TIM_Base_Start_IT)
+│     · MspInit: activa TIM2_CLK, fija TIM2_IRQn en prioridad NVIC 5 / subprio 0
+│     · TIM2 configurado pero aún no arrancado
 │     · SysTick: sigue deshabilitado
 │     · SystemCoreClock = 84 000 000
 │
-├─ F. osThreadDef + osThreadCreate  (CMSIS-OS wrapper de FreeRTOS)
-│     · Crea el TCB y la pila (128 words) de "defaultTask" en el heap FreeRTOS
-│     · Prioridad: osPriorityNormal (FreeRTOS priority 24)
+├─ E'. HAL_TIM_Base_Start_IT(&htim2)
+│     · Habilita la interrupción de actualización (UEV) de TIM2 en el periférico
+│     · TIM2 ARRANCA: genera TIM2_IRQHandler cada 100 µs
+│          → HAL_TIM_IRQHandler → HAL_TIM_PeriodElapsedCallback → ulHighFrequencyTimerTicks++
+│     · SysTick: sigue deshabilitado
+│
+├─ F. app_init()    (app.c — llamada desde main() antes del scheduler)
+│     · Inicializa contadores globales a cero (g_app_cnt, g_app_tick_cnt, etc.)
+│     · Log por UART (identificación del proyecto)
+│     · Crea task_btn: pila 256 words, prioridad tskIDLE_PRIORITY + 1 = 1
+│     · Crea task_led: pila 256 words, prioridad tskIDLE_PRIORITY + 1 = 1
+│     · Inicializa DWT (contador de ciclos para medición en µs)
+│     · defaultTask NO se crea (#ifdef _defaultTask_ no está definido)
 │     · SysTick: sigue deshabilitado
 │
 ├─ G. osKernelStart() → xTaskStartScheduler() → xPortStartScheduler()
@@ -232,10 +246,10 @@ MAIN()
 │          · Limpia CONTROL (modo Thread privilegiado)
 │          · cpsie i / cpsie f  → habilita interrupciones globales
 │          · svc 0  → dispara SVC → vPortSVCHandler
-│               · Restaura contexto de defaultTask
-│               · PSP apunta a la pila de defaultTask
+│               · Restaura contexto de task_btn (primera tarea en el scheduler)
+│               · PSP apunta a la pila de task_btn
 │               · bx r14 (EXC_RETURN=0xFFFFFFFD) → retorna a Thread mode con PSP
-│          · CPU comienza a ejecutar StartDefaultTask()
+│          · CPU comienza a ejecutar task_btn (o task_led, según el scheduler)
 │
 │  *** CONTROL NUNCA VUELVE A main() ***
 │
@@ -255,7 +269,7 @@ MAIN()
 | Tras copia de `.data` (paso 3 del startup) | **16 000 000** | Valor de inicialización estática copiado desde Flash |
 | Tras `HAL_Init()` | **16 000 000** | HAL usa el reloj por defecto (HSI) |
 | Tras `SystemClock_Config()` → `HAL_RCC_ClockConfig()` | **84 000 000** | PLL activo; HAL llama `SystemCoreClockUpdate()` internamente |
-| Durante `MX_TIM2_Init()` y creación de tareas | **84 000 000** | Sin cambio |
+| Durante `MX_TIM2_Init()`, `HAL_TIM_Base_Start_IT()`, `app_init()` | **84 000 000** | Sin cambio |
 | Tras `osKernelStart()` y en adelante | **84 000 000** | Sin cambio |
 
 ### 3.2 SysTick
@@ -266,7 +280,10 @@ MAIN()
 | `SystemInit()`, copia `.data`, `__libc_init_array` | Deshabilitado | CTRL=0 |
 | `HAL_Init()` | Deshabilitado | CTRL=0 — HAL usa TIM1, no SysTick |
 | `SystemClock_Config()` | Deshabilitado | CTRL=0 |
-| `MX_GPIO/UART/TIM2_Init()` | Deshabilitado | CTRL=0 |
+| `MX_GPIO_Init()`, `MX_USART2_UART_Init()` | Deshabilitado | CTRL=0 |
+| `MX_TIM2_Init()` | Deshabilitado | CTRL=0 |
+| `HAL_TIM_Base_Start_IT(&htim2)` | Deshabilitado | CTRL=0 — TIM2 arranca (interrupción de periférico, independiente de SysTick) |
+| `app_init()` | Deshabilitado | CTRL=0 |
 | `osKernelStart()` → `vPortSetupTimerInterrupt()` | **Habilitado** | LOAD=83 999, CTRL=0x07 |
 | En ejecución del scheduler | Genera IRQ cada **1 ms** | LOAD=83 999, reloj interno del core |
 
@@ -379,42 +396,47 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
 ### 5.3 Propósito de TIM2 en este proyecto
 
-TIM2 está pensado como **contador de alta resolución para las estadísticas de runtime de FreeRTOS** (`configGENERATE_RUN_TIME_STATS = 1`). La infraestructura definida en `FreeRTOSConfig.h`:
+TIM2 es el **contador de alta resolución para las estadísticas de runtime de FreeRTOS** (`configGENERATE_RUN_TIME_STATS = 1`). La infraestructura definida en `FreeRTOSConfig.h`:
 
 ```c
 #define portCONFIGURE_TIMER_FOR_RUN_TIME_STATS  configureTimerForRunTimeStats
 #define portGET_RUN_TIME_COUNTER_VALUE          getRunTimeCounterValue
 ```
 
-requiere que `configureTimerForRunTimeStats()` arranque TIM2 y que `getRunTimeCounterValue()` lea su registro `CNT`. En `freertos.c` estas funciones están implementadas como stubs vacíos con `__weak`:
+requiere que `configureTimerForRunTimeStats()` inicialice el contador de tiempo y que `getRunTimeCounterValue()` lo lea. `Core/Src/freertos.c` provee stubs `__weak` (vacíos), pero `main.c` define implementaciones reales (no-`__weak`) que las sobreescriben en el enlace:
 
 ```c
-__weak void configureTimerForRunTimeStats(void)  { /* vacío */ }
-__weak unsigned long getRunTimeCounterValue(void) { return 0; }
+// En main.c — implementaciones reales, no weak:
+void configureTimerForRunTimeStats(void)  { ulHighFrequencyTimerTicks = 0; }
+unsigned long getRunTimeCounterValue(void){ return ulHighFrequencyTimerTicks; }
 ```
 
-**En el estado actual del proyecto, TIM2 nunca se arranca** (`HAL_TIM_Base_Start_IT()` no se llama) y las estadísticas de runtime siempre reportan 0. Para completar la funcionalidad se debería:
+TIM2 **sí se arranca** en `main.c` mediante `HAL_TIM_Base_Start_IT(&htim2)` antes de llamar a `osKernelStart()`. Cada vez que TIM2 desborda (cada 100 µs), su ISR incrementa la variable global `ulHighFrequencyTimerTicks`. Esto provee a FreeRTOS una base de tiempo de alta resolución para contabilizar el tiempo de CPU consumido por cada tarea.
 
-1. En `configureTimerForRunTimeStats()`: llamar `HAL_TIM_Base_Start(&htim2)` (sin interrupción, en modo free-running).
-2. En `getRunTimeCounterValue()`: retornar `__HAL_TIM_GET_COUNTER(&htim2)`.
+FreeRTOS llama a `configureTimerForRunTimeStats()` al iniciar el scheduler (resetea el contador) y a `getRunTimeCounterValue()` en cada cambio de contexto y al generar los reportes de `vTaskGetRunTimeStats()`.
 
-Con prescaler=1 y reloj TIM2=84 MHz / 2 = 42 MHz, el contador tiene resolución de ~23.8 ns y desborda cada ~99.4 µs, ofreciendo una resolución aproximadamente 100 veces mayor que el tick del kernel (1 ms).
+Con prescaler=1 y reloj TIM2 = 84 MHz / 2 = 42 MHz, cada overflow ocurre en exactamente 100 µs (resolución del contador ≈ 23.8 ns), ofreciendo una granularidad 10 veces superior al tick del kernel (1 ms).
 
 ### 5.4 Resumen de la interacción TIM2–HAL
 
 ```
 MX_TIM2_Init()
-    └─ HAL_TIM_Base_Init(&htim2)        ← configura registros TIM2 vía HAL
-         └─ HAL_TIM_Base_MspInit()      ← activa reloj APB1 para TIM2
+    └─ HAL_TIM_Base_Init(&htim2)           ← configura registros TIM2 vía HAL
+         └─ HAL_TIM_Base_MspInit()         ← activa TIM2_CLK, NVIC TIM2_IRQn prio=5
 
-[TIM2 no se arranca — estado actual del proyecto]
+HAL_TIM_Base_Start_IT(&htim2)              ← TIM2 ARRANCA con UEV interrupt habilitada
 
-Si TIM2 estuviera activo y su interrupción habilitada:
-    TIM2 desborda (cada 100 µs)
-        └─ TIM2_IRQHandler()            (stm32f4xx_it.c)
-               └─ HAL_TIM_IRQHandler(&htim2)  (HAL)
-                      └─ HAL_TIM_PeriodElapsedCallback()  (main.c)
-                             └─ [sin acción para TIM2 en el código actual]
+TIM2 desborda (cada 100 µs)
+    └─ TIM2_IRQHandler()                   (stm32f4xx_it.c)
+           └─ HAL_TIM_IRQHandler(&htim2)   (stm32f4xx_hal_tim.c)
+                  └─ HAL_TIM_PeriodElapsedCallback()  (main.c)
+                         └─ ulHighFrequencyTimerTicks++
+
+FreeRTOS runtime stats:
+    portCONFIGURE_TIMER_FOR_RUN_TIME_STATS → configureTimerForRunTimeStats()
+        └─ ulHighFrequencyTimerTicks = 0   (al iniciar scheduler)
+    portGET_RUN_TIME_COUNTER_VALUE → getRunTimeCounterValue()
+        └─ return ulHighFrequencyTimerTicks (en cada context switch / vTaskGetRunTimeStats)
 ```
 
 ---
@@ -444,32 +466,31 @@ Si TIM2 estuviera activo y su interrupción habilitada:
               │                         │  SysTick: APAGADO
               └────────┬────────────────┘
                        │
-              ┌────────▼────────┐
-              │ MX_GPIO_Init()  │
-              │ MX_UART2_Init() │  Periféricos listos
-              │ MX_TIM2_Init()  │  TIM2 config. (no arrancado)
-              └────────┬────────┘
-                       │
-              ┌────────▼────────┐
-              │ osThreadCreate  │  Crea defaultTask en heap FreeRTOS
-              └────────┬────────┘
+              ┌────────────────────────────┐
+              │ MX_GPIO_Init()             │
+              │ MX_UART2_Init()            │  Periféricos listos
+              │ MX_TIM2_Init()             │  TIM2 configurado, TIM2_IRQn prio=5
+              │ HAL_TIM_Base_Start_IT()    │  TIM2 arranca → ulHighFreqTimerTicks++
+              │ app_init()                 │  task_btn + task_led creadas (prio=1)
+              └────────┬───────────────────┘
                        │
               ┌────────▼────────┐
               │ osKernelStart() │  SysTick LOAD=83999, CTRL=0x07
               │                 │  PendSV prio=0xF0, SysTick prio=0xF0
-              │                 │  SVC 0 → arranca defaultTask
+              │                 │  SVC 0 → arranca primera tarea (task_btn / task_led)
               └────────┬────────┘
                        │
-          ┌────────────┴────────────────────┐
-          │                                 │
- ┌────────▼──────────┐            ┌─────────▼──────────┐
- │   defaultTask     │            │    Idle Task        │
- │   for(;;)         │            │  vApplicationIdleHook│
- │     osDelay(1)    │            │    (vacía)          │
- └───────────────────┘            └────────────────────┘
+     ┌─────────────────┼────────────────────┐
+     │                 │                    │
+ ┌───▼──────────┐  ┌───▼──────────┐  ┌─────▼──────────────┐
+ │  task_btn    │  │  task_led    │  │    Idle Task        │
+ │  prio=1      │  │  prio=1      │  │  vApplicationIdleHook│
+ │  polling GPIO│  │  control LED │  │    g_task_idle_cnt++│
+ └──────────────┘  └──────────────┘  └────────────────────┘
           │
-          │  cada 1 ms: SysTick ISR → xTaskIncrementTick → PendSV → context switch
-          │  cada 1 ms: TIM1 ISR   → HAL_IncTick()  (uwTick++)
+          │  cada 1 ms:   SysTick ISR → xTaskIncrementTick → PendSV → context switch
+          │  cada 1 ms:   TIM1 ISR   → HAL_IncTick()  (uwTick++)
+          │  cada 100 µs: TIM2 ISR   → ulHighFrequencyTimerTicks++
 ```
 
 ---

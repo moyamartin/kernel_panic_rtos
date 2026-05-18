@@ -138,3 +138,35 @@ void vTaskDelete( TaskHandle_t xTask );
 
 donde xTask es el handler de una tarea.
 
+## Paso 3
+
+Se realizaron tres experimentos:
+
+1- se incrementa la prioridad de `task_led`. En este caso, solo se ejecuta la tarea `task_led` y el sistema deja de responder ante las pulsaciones del boton azul.
+
+2- se incrementa la prioridad de `task_btn`. En este caso, solo se ejecuta la tarea `task_btn` y el sistema solamente muestra los estados de esta task por la terminal y el LED no titila.
+
+3- Se restauran ambas prioridades y el sistema vuelve a su normalidad.
+
+## Paso 4
+
+Al agregar las 3 tareas distintas de `task_btn` y eliminar una sola dentro del `super-loop` Tarea de `task_led`:
+
+```c
+    	if(h_task_btn_3 != NULL){
+    		vTaskDelete(h_task_btn_3);
+    		h_task_btn_3 = NULL;
+    	}
+```
+
+Se puede observar que a veces `Task BTN 2` llega a mostrar por la terminal que fue ejecutada compartiendo la funcionalidad con `Task BTN 1` como se puede observar en el siguiente log:
+
+```
+[info]  Task BTN 1 - BTN HOVER
+[info]  Task BTN 2 - BTN HOVER
+[info]  Task LED - LED OFF
+[info]  Task BTN 1 - BTN PRESSED
+[info]  Task LED - LED BLINK
+```
+
+Por el otro lado, si eliminamos la guarda que verifica `h_task_btn_3` y no asignamos `NULL` a `h_task_btn_3`, se borran las tres tareas generadas de `task_btn` y solo se corre `task_led`.

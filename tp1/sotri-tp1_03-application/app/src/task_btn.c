@@ -122,7 +122,7 @@ void task_btn_statechart(task_btn_dta_t* btn_data)
 					/* Print out: Task execution */
 					LOGGER_INFO(" %s - BTN PRESSED", pcTaskGetName(NULL));
 
-					put_event_task_led(EV_LED_BLINK);
+					put_event_task_led(btn_data->led, EV_LED_BLINK);
 					btn_data->state = ST_BTN_DOWN;
 				}
 				else
@@ -152,7 +152,7 @@ void task_btn_statechart(task_btn_dta_t* btn_data)
 					/* Print out: Task execution */
 					LOGGER_INFO(" %s - BTN HOVER", pcTaskGetName(NULL));
 
-					put_event_task_led(EV_LED_OFF);
+					put_event_task_led(btn_data->led, EV_LED_OFF);
 					btn_data->state = ST_BTN_UP;
 				}
 				else

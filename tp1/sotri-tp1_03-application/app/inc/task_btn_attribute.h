@@ -41,7 +41,7 @@ extern "C" {
 #endif
 
 /********************** inclusions *******************************************/
-
+#include "task_led_attribute.h"
 /********************** macros ***********************************************/
 #define DEL_BTN_MIN			0ul
 #define DEL_BTN_MED			25ul
@@ -65,6 +65,7 @@ typedef struct
 	TickType_t		tick;
 	GPIO_TypeDef *	gpio_port;
 	uint16_t		pin;
+	task_led_dta_t* led;
 } task_btn_dta_t;
 
 /********************** external data declaration ****************************/

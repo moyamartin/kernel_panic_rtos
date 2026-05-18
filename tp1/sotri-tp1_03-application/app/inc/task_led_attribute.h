@@ -46,7 +46,9 @@ extern "C" {
 #include "cmsis_os.h"
 
 /********************** macros ***********************************************/
-
+#define DEL_LED_MIN			0ul
+#define DEL_LED_MED			250ul
+#define DEL_LED_MAX			500ul
 /********************** typedef **********************************************/
 /* Events to excite Task */
 typedef enum task_led_ev {EV_LED_OFF,

@@ -46,6 +46,7 @@
 #include "app_it.h"
 #include "task_btn.h"
 #include "task_btn_attribute.h"
+#include "task_led_attribute.h"
 #include "task_led.h"
 
 /********************** macros and definitions *******************************/
@@ -85,16 +86,28 @@ uint32_t g_app_stack_overflow_cnt;
 TaskHandle_t h_task_btn;
 TaskHandle_t h_task_led;
 
+/* Task LED configurations */
+task_led_dta_t task_led_dta_ld2 = {
+		false, EV_LED_OFF, ST_LED_OFF, DEL_LED_MIN,
+		LD2_GPIO_Port, LD2_Pin
+};
+task_led_dta_t task_led_dta_ldred = {
+		false, EV_LED_OFF, ST_LED_OFF, DEL_LED_MIN,
+		LDRED_GPIO_Port, LDRED_Pin
+};
+
 /* Task Btn configurations */
 task_btn_dta_t task_btn_dta_b1 = {
 		EV_BTN_UP, ST_BTN_UP, DEL_BTN_MIN,
-		B1_GPIO_Port, B1_Pin
+		B1_GPIO_Port, B1_Pin, &task_led_dta_ld2
 };
-
 task_btn_dta_t task_btn_dta_g1 = {
 		EV_BTN_UP, ST_BTN_UP, DEL_BTN_MIN,
-		G1_GPIO_Port, G1_Pin
+		G1_GPIO_Port, G1_Pin, &task_led_dta_ldred
 };
+
+
+
 
 
 /********************** external functions definition ************************/
@@ -128,7 +141,7 @@ void app_init(void)
 
     /* Task BTN thread at priority 1 */
     ret = xTaskCreate(task_btn,							/* Pointer to the function thats implement the task. */
-					  "Task BTN B1",						/* Text name for the task. This is to facilitate debugging only. */
+					  "Task BTN B1",					/* Text name for the task. This is to facilitate debugging only. */
 					  (2 * configMINIMAL_STACK_SIZE),	/* Stack depth in words. */
 					  (void *)&task_btn_dta_b1,			/* We are using the task parameter. */
 					  (tskIDLE_PRIORITY + 1ul),			/* This task will run at priority 1. */
@@ -139,7 +152,7 @@ void app_init(void)
 
     /* Task BTN thread at priority 1 */
     ret = xTaskCreate(task_btn,							/* Pointer to the function thats implement the task. */
-					  "Task BTN G1",						/* Text name for the task. This is to facilitate debugging only. */
+					  "Task BTN G1",					/* Text name for the task. This is to facilitate debugging only. */
 					  (2 * configMINIMAL_STACK_SIZE),	/* Stack depth in words. */
 					  (void *)&task_btn_dta_g1,			/* We are using the task parameter. */
 					  (tskIDLE_PRIORITY + 1ul),			/* This task will run at priority 1. */
@@ -151,10 +164,21 @@ void app_init(void)
 
     /* Task LED thread at priority 1 */
     ret = xTaskCreate(task_led,							/* Pointer to the function thats implement the task. */
-					  "Task LED",						/* Text name for the task. This is to facilitate debugging only. */
+					  "Task LED LD2",					/* Text name for the task. This is to facilitate debugging only. */
 					  (2 * configMINIMAL_STACK_SIZE),	/* Stack depth in words. */
-					  NULL,								/* We are not using the task parameter. */
-					  (tskIDLE_PRIORITY + 1ul),			/* This task will run at priority 1. */
+					  (void *)&task_led_dta_ld2,		/* We are not using the task parameter. */
+					  (tskIDLE_PRIORITY + 2ul),			/* This task will run at priority 1. */
+					  &h_task_led);						/* We are using a variable as task handle. */
+
+    /* Check the thread was created successfully. */
+    configASSERT(pdPASS == ret);
+
+    /* Task LED thread at priority 1 */
+    ret = xTaskCreate(task_led,							/* Pointer to the function thats implement the task. */
+					  "Task LED LDRED",					/* Text name for the task. This is to facilitate debugging only. */
+					  (2 * configMINIMAL_STACK_SIZE),	/* Stack depth in words. */
+					  (void *)&task_led_dta_ldred,		/* We are not using the task parameter. */
+					  (tskIDLE_PRIORITY + 2ul),			/* This task will run at priority 1. */
 					  &h_task_led);						/* We are using a variable as task handle. */
 
     /* Check the thread was created successfully. */

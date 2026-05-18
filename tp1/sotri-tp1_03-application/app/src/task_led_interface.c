@@ -57,10 +57,10 @@
 /********************** external data declaration ****************************/
 
 /********************** external functions definition ************************/
-void put_event_task_led(task_led_ev_t event)
+void put_event_task_led(task_led_dta_t* led, task_led_ev_t event)
 {
-	task_led_dta.event = event;
-	task_led_dta.flag = true;
+	led->event = event;
+	led->flag = true;
 }
 
 /********************** end of file ******************************************/

@@ -41,7 +41,6 @@ extern "C" {
 #endif
 
 /********************** inclusions *******************************************/
-
 /********************** macros ***********************************************/
 
 /********************** typedef **********************************************/
@@ -49,7 +48,7 @@ extern "C" {
 /********************** external data declaration ****************************/
 
 /********************** external functions declaration ***********************/
-extern void put_event_task_led(task_led_ev_t event);
+extern void put_event_task_led(task_led_dta_t* led, task_led_ev_t event);
 
 /********************** End of CPP guard *************************************/
 #ifdef __cplusplus

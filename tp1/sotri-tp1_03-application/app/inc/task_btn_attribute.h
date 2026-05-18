@@ -43,7 +43,9 @@ extern "C" {
 /********************** inclusions *******************************************/
 
 /********************** macros ***********************************************/
-
+#define DEL_BTN_MIN			0ul
+#define DEL_BTN_MED			25ul
+#define DEL_BTN_MAX			50ul
 /********************** typedef **********************************************/
 /* Events to excite Task */
 typedef enum task_btn_ev {EV_BTN_UP,

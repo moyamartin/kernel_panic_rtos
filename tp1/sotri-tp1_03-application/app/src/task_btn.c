@@ -51,21 +51,14 @@
 /********************** macros and definitions *******************************/
 #define G_TASK_BTN_CNT_INI	0ul
 
-#define DEL_BTN_MIN			0ul
-#define DEL_BTN_MED			25ul
-#define DEL_BTN_MAX			50ul
-
 #define EV_SYS_IDLE			0ul
 #define EV_SYS_LOOP_DET		1ul
 
 /********************** internal data declaration ****************************/
-task_btn_dta_t task_btn_dta = {
-		EV_BTN_UP, ST_BTN_UP, DEL_BTN_MIN,
-		B1_GPIO_Port, B1_Pin
-};
+
 
 /********************** internal functions declaration ***********************/
-void task_btn_statechart(void);
+void task_btn_statechart(task_btn_dta_t* btn_data);
 
 /********************** internal data definition *****************************/
 
@@ -76,7 +69,7 @@ uint32_t g_task_btn_cnt;
 /* Task BTN thread */
 void task_btn(void *parameters)
 {
-	task_btn_dta_t* task_btn_dta = (task_btn_data_t *) parameters;
+	task_btn_dta_t* task_btn_dta = (task_btn_dta_t *) parameters;
 	/*  Declare & Initialize Task Function variables */
 	g_task_btn_cnt = G_TASK_BTN_CNT_INI;
 
@@ -91,14 +84,14 @@ void task_btn(void *parameters)
 		g_task_btn_cnt++;
 		
 		/* Run Task Statechart */
-    	task_btn_statechart(task_btn_data);
+    	task_btn_statechart(task_btn_dta);
 	}
 }
 
-void task_btn_statechart(task_btn_data_t* btn_data)
+void task_btn_statechart(task_btn_dta_t* btn_data)
 {
 	/* Get Events to excite Task */
-	if (BTN_PRESSED == HAL_GPIO_ReadPin(btn_data->gpio_port, btn_data.pin))
+	if (BTN_PRESSED == HAL_GPIO_ReadPin(btn_data->gpio_port, btn_data->pin))
 	{
 		btn_data->event = EV_BTN_DOWN;
 	}

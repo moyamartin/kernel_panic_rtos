@@ -45,6 +45,7 @@
 #include "board.h"
 #include "app_it.h"
 #include "task_btn.h"
+#include "task_btn_attribute.h"
 #include "task_led.h"
 
 /********************** macros and definitions *******************************/
@@ -53,6 +54,10 @@
 #define G_APP_TICK_CNT_INI				0ul
 #define G_TASK_IDLE_CNT_INI				0ul
 #define G_APP_STACK_OVERFLOW_CNT_INI	0ul
+
+#define DEL_BTN_MIN			0ul
+#define DEL_BTN_MED			25ul
+#define DEL_BTN_MAX			50ul
 
 /********************** internal data declaration ****************************/
 
@@ -81,10 +86,16 @@ TaskHandle_t h_task_btn;
 TaskHandle_t h_task_led;
 
 /* Task Btn configurations */
-task_btn_dta_t task_btn_dta = {
+task_btn_dta_t task_btn_dta_b1 = {
 		EV_BTN_UP, ST_BTN_UP, DEL_BTN_MIN,
 		B1_GPIO_Port, B1_Pin
 };
+
+task_btn_dta_t task_btn_dta_g1 = {
+		EV_BTN_UP, ST_BTN_UP, DEL_BTN_MIN,
+		G1_GPIO_Port, G1_Pin
+};
+
 
 /********************** external functions definition ************************/
 void app_init(void)
@@ -117,9 +128,20 @@ void app_init(void)
 
     /* Task BTN thread at priority 1 */
     ret = xTaskCreate(task_btn,							/* Pointer to the function thats implement the task. */
-					  "Task BTN",						/* Text name for the task. This is to facilitate debugging only. */
+					  "Task BTN B1",						/* Text name for the task. This is to facilitate debugging only. */
 					  (2 * configMINIMAL_STACK_SIZE),	/* Stack depth in words. */
-					  (void *)&task_btn_data,			/* We are using the task parameter. */
+					  (void *)&task_btn_dta_b1,			/* We are using the task parameter. */
+					  (tskIDLE_PRIORITY + 1ul),			/* This task will run at priority 1. */
+					  &h_task_btn);						/* We are using a variable as task handle. */
+
+    /* Check the thread was created successfully. */
+    configASSERT(pdPASS == ret);
+
+    /* Task BTN thread at priority 1 */
+    ret = xTaskCreate(task_btn,							/* Pointer to the function thats implement the task. */
+					  "Task BTN G1",						/* Text name for the task. This is to facilitate debugging only. */
+					  (2 * configMINIMAL_STACK_SIZE),	/* Stack depth in words. */
+					  (void *)&task_btn_dta_g1,			/* We are using the task parameter. */
 					  (tskIDLE_PRIORITY + 1ul),			/* This task will run at priority 1. */
 					  &h_task_btn);						/* We are using a variable as task handle. */
 

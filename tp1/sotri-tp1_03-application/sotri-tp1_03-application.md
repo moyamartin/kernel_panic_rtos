@@ -1,15 +1,15 @@
-### Como usar el parametro de Tarea?
+### ¿Cómo usar el parámetro de una Tarea?
 
-Para usar el parametro de la tarea, primero se pasa el puntero al dato que se quiere pasar y se hace un cast a un puntero a void
+Para pasar datos a una tarea, se envía el puntero al dato casteado a `void*` como argumento de `xTaskCreate()`:
 
-```
+```c
     // Configuración global de los parámetros para cada instancia
     task_config_t config1 = { .task_id = 1, .delay_ms = 500 };
 
     xTaskCreate(ATask, "ATask_1", 1024, (void*)&config1, 1, NULL);
 ```
 
-Despues, en el handler de la funcion, se tiene que volver a castear al tipo de datos original:
+Dentro del handler de la tarea, se vuelve a castear al tipo original:
 
 ```c
     // Función de la tarea (se usa para todas las instancias)
@@ -28,9 +28,9 @@ Despues, en el handler de la funcion, se tiene que volver a castear al tipo de d
 ```
 
 
-### Como cambiar la prioridad de una Tarea ya creada?
+### ¿Cómo cambiar la prioridad de una Tarea ya creada?
 
-Llamando a la funcion primitiva:
+Llamando a la función primitiva:
 
 ```c
 vTaskPrioritySet( TaskHandle_t xTask,
@@ -39,16 +39,18 @@ vTaskPrioritySet( TaskHandle_t xTask,
 
 donde:
 
-- `xTask`: es el `handle` de la task cuya prioridad quiere ser modificada.
-- `uxNewPriority`: La prioridad a la que se quiere modificar.
+- `xTask`: es el `handle` de la tarea cuya prioridad se quiere modificar.
+- `uxNewPriority`: la prioridad a la que se quiere llevar la tarea.
 
-## Paso 3
+## Experimentos realizados
 
-Se modificaron las funciones `task_btn` y `task_btn_statechart` para que tomen como parametro
-un puntero a una variable tipo `task_btn_data_t`. Donde `task_btn_data_t` contiene los datos
-para manejar un GPIO distinto de la placa.
+### Paso 3
 
-Asi mismo, se creo una tarea distinta para que maneje el boton G1 (externo) mapeado al gpio PC0:
+Se modificaron las funciones `task_btn` y `task_btn_statechart` para que tomen como parámetro
+un puntero a una estructura `task_btn_dta_t`, que encapsula los datos necesarios para controlar
+un GPIO específico de la placa.
+
+Asimismo, se creó una tarea independiente para manejar el botón G1 (externo) mapeado al GPIO PC0:
 
 - app.c:
 ```c
@@ -87,8 +89,8 @@ task_btn_dta_t task_btn_dta_g1 = {
     configASSERT(pdPASS == ret);
 ```
 
-En este caso, al pulsar cualquiera de los dos botones el led verde de la placa (LD2) se enciende y se apaga como corresponde.
-Y en los logs se observa:
+En este punto, al pulsar cualquiera de los dos botones, el LED verde de la placa (LD2) se enciende y se apaga correctamente.
+En los logs se observa:
 
 ```
 [info]  Task BTN B1 - BTN PRESSED
@@ -101,14 +103,14 @@ Y en los logs se observa:
 [info]  Task LED - LED OFF
 ```
 
-## Paso 4
+### Paso 4
 
 Se modifica `task_led` de la misma forma que `task_btn` y se agrega un LED rojo externo sobre el GPIO `PC1`.
-Adicionalmente se modifica `task_led_interface` para que acepte como parametro un puntero a una variable tipo
-`task_led_dta_t` y se modifica `task_btn_dta_t` para que tenga un miembro que sea un puntero a una variable tipo
-`task_led_dta_t`. De esta forma, ambos botones se pueden independizar para los dos LEDs que se agregan en este paso.
+Adicionalmente, se modifica `task_led_interface` para que acepte como parámetro un puntero a una variable tipo
+`task_led_dta_t`, y se extiende `task_btn_dta_t` con un miembro que apunta a la instancia de `task_led_dta_t`
+que le corresponde. De esta forma, cada botón queda vinculado a un LED independiente.
 
-```
+```c
 /* Task LED configurations */
 task_led_dta_t task_led_dta_ld2 = {
 		false, EV_LED_OFF, ST_LED_OFF, DEL_LED_MIN,
@@ -156,31 +158,31 @@ task_btn_dta_t task_btn_dta_g1 = {
     configASSERT(pdPASS == ret);
 
 
-    /* Task LED thread at priority 1 */
+    /* Task LED thread at priority 2 */
     ret = xTaskCreate(task_led,                         /* Pointer to the function thats implement the task. */
                       "Task LED LD2",                   /* Text name for the task. This is to facilitate debugging only. */
                       (2 * configMINIMAL_STACK_SIZE),   /* Stack depth in words. */
-                      (void *)&task_led_dta_ld2,        /* We are not using the task parameter. */
-                      (tskIDLE_PRIORITY + 2ul),         /* This task will run at priority 1. */
+                      (void *)&task_led_dta_ld2,        /* We are using the task parameter. */
+                      (tskIDLE_PRIORITY + 2ul),         /* This task will run at priority 2. */
                       &h_task_led);                     /* We are using a variable as task handle. */
 
     /* Check the thread was created successfully. */
     configASSERT(pdPASS == ret);
 
-    /* Task LED thread at priority 1 */
+    /* Task LED thread at priority 2 */
     ret = xTaskCreate(task_led,                         /* Pointer to the function thats implement the task. */
                       "Task LED LDRED",                 /* Text name for the task. This is to facilitate debugging only. */
                       (2 * configMINIMAL_STACK_SIZE),   /* Stack depth in words. */
-                      (void *)&task_led_dta_ldred,      /* We are not using the task parameter. */
-                      (tskIDLE_PRIORITY + 2ul),         /* This task will run at priority 1. */
+                      (void *)&task_led_dta_ldred,      /* We are using the task parameter. */
+                      (tskIDLE_PRIORITY + 2ul),         /* This task will run at priority 2. */
                       &h_task_led);                     /* We are using a variable as task handle. */
 
     /* Check the thread was created successfully. */
     configASSERT(pdPASS == ret);
 ```
 
-Finalmente, se incrementa la prioridad de las tareas de los LEDs y dentro del `super-loop` de `task_led` se reduce
-la prioridad de dichas tareas a la misma que de las botones:
+Se incrementa la prioridad inicial de las tareas de los LEDs y, dentro del `super-loop` de `task_led`,
+se reduce la prioridad de dichas tareas a la misma que la de los botones:
 
 - `task_led.c`
 ```c
@@ -207,12 +209,11 @@ De esta forma podemos observar lo siguiente:
 [info] Task BTN G1 is running - Tick [mS] =   1
 ```
 
-las tareas de los LEDs se inician al principio y despues la tarea de los botones.
-De esta forma nos aseguramos que los LEDs esten inicializados antes de que el sistema
+Las tareas de los LEDs se inician primero y, a continuación, las de los botones.
+De esta forma nos aseguramos de que los LEDs estén inicializados antes de que el sistema
 pueda responder a los pulsadores.
 
-Finalmente, podemos observar que el sistema responde a los pulsadores como es
-esperado:
+Finalmente, se puede observar que el sistema responde a los pulsadores de la manera esperada:
 
 ```
 [info]  Task BTN B1 - BTN PRESSED
@@ -224,4 +225,3 @@ esperado:
 [info]  Task BTN G1 - BTN HOVER
 [info]  Task LED LDRED - LED OFF
 ```
-

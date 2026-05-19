@@ -107,9 +107,6 @@ task_btn_dta_t task_btn_dta_g1 = {
 };
 
 
-
-
-
 /********************** external functions definition ************************/
 void app_init(void)
 {

@@ -1,165 +1,155 @@
-### ¿Cómo FreeRTOS asigna tiempo de procesamiento a cada Tarea en una aplicación?
+### ¿Cómo FreeRTOS asigna tiempo de procesamiento a cada Tarea?
 
-FreeRTOS utiliza un `scheduler` que decide que tarea se ejecuta en cada momento.
-El mecanismo dependera de la politica de planificacion configurada.
+FreeRTOS utiliza un *scheduler* (planificador) que decide qué tarea se ejecuta en cada momento. El mecanismo exacto depende de la política de planificación configurada. 
 
-Hay tres tipos de configuraciones
+Existen tres configuraciones principales:
 
-- preemptivo con time-slicing (`configUSE_PREEMPTION = 1` y `configUSE_TIME_SLICING = 1`)
+1. **Preemptivo con time-slicing** (`configUSE_PREEMPTION = 1` y `configUSE_TIME_SLICING = 1`)
+   La planificación preemptiva funciona de la siguiente manera:
+   - Para tareas de **igual prioridad**, el *scheduler* alterna entre ellas utilizando particiones de tiempo (*Round-Robin Scheduling*).
+   - Si una tarea se encuentra en estado `RUNNING` y otra tarea de **mayor prioridad** pasa al estado `READY`, el CPU interrumpe la tarea actual y ejecuta la de mayor prioridad. La tarea interrumpida regresa al estado `READY`.
 
-La planificacion preemptiva funciona de la siguiente manera:
+2. **Preemptivo sin time-slicing** (`configUSE_PREEMPTION = 1` y `configUSE_TIME_SLICING = 0`)
+   Mantiene el concepto de interrupción por prioridad del caso anterior, pero **no** utiliza *quantums* de tiempo para alternar entre tareas de la misma prioridad. El *scheduler* solo realiza un cambio de contexto si:
+   - Una tarea de mayor prioridad entra en el estado `READY`.
+   - La tarea en ejecución cede el control al entrar en estado `BLOCKED` o `SUSPENDED`.
 
-    - para tares de igual prioridad, el scheduler va turnando las tareas (`Round Robing Scheduling`)
-    - Si una tarea se encuentra en estado `RUNNING` y otra tarea pasa al estado `READY`, el CPU
-    corre la tarea de mayor prioridad y la de menor prioridad pasa a `READY`.
+3. **Planificación cooperativa** (`configUSE_PREEMPTION = 0`)
+   El cambio de contexto ocurre **únicamente** cuando la tarea en ejecución entra en estado `BLOCKED`, o cuando llama explícitamente a `taskYIELD()` para invocar al *scheduler* de forma manual.
 
-- preemptivo sin time-slicing (`configUSE_PREEMPTION = 1` y  1configUSE_TIME_SLICING = 0`)
+---
 
-usa el mismo concepto que la configuracion anterior con respecto a las tareas de mayor prioridad,
-pero no usa pedazos de tiempo para compartir el procesamiento entre tareas de menor o igual prioridad.
-En este caso, el scheduler corre una nueva tarea si:
+### ¿Cómo elige FreeRTOS qué Tarea debe ejecutarse?
 
-	- una tarea de mayor prioridad entra en el estado `READY`.
-	- La tarea ejecutandose entra en el estado `BLOCKED` o `SUSPENDED`.
+La selección se basa estrictamente en la **prioridad**. El *scheduler* siempre ejecutará la tarea en estado `READY` que posea la prioridad más alta disponible.
 
-- Planificacion cooperativa
+---
 
-Ocurre el cambio de contexto solo cuando la tarea que corre entra en estado `BLOCKED` o cuando la tarea corriendo explicitamente llama `yield` (llama al re-scheduler de forma manual)
+### ¿Cómo afecta la prioridad relativa al comportamiento del sistema?
 
-### Como FreeRTOS elige que Tarea debe ejecutarse en un momento dado?
+El *scheduler* prioriza la ejecución de las tareas de mayor jerarquía. Supongamos que tenemos la **Task 1** (alta prioridad) y la **Task 2** (baja prioridad):
 
-FreeRTOS elige la tarea segun la prioridad de la misma. Es decir, ejecuta primero las tareas que estan en READY con mayor prioridad.
+1. Se ejecuta la Task 1, imprime mensajes en la terminal y luego eleva la prioridad de la Task 2.
+2. Como ahora la Task 2 tiene mayor prioridad, el *scheduler* desaloja a la Task 1 y comienza a ejecutar la Task 2.
+3. La Task 2 imprime sus mensajes y disminuye su propia prioridad. El *scheduler* devuelve el control a la Task 1, y el ciclo se repite.
 
-### Como la prioridad relativa de cada Tarea afecta el comportamiento del sistema?
+Si ambas tareas tuvieran la **misma prioridad** (y el *time-slicing* estuviera activo), el *scheduler* les asignaría el mismo tiempo de procesamiento y se ejecutarían de forma alternada. Por el contrario, si la Task 1 nunca se bloqueara ni redujera su prioridad, la Task 2 jamás obtendría tiempo de CPU, entrando en un estado de **inanición** (*starvation*).
 
-El scheduler siempre va a priorizar la tarea con mayor prioridad, valga la redundancia. Supongamos que creamos dos Tasks: Task 1 con la mayor prioridad y Task 2 con menor prioridad.
+---
 
-La task 1 se ejecuta:
-    1. Escribe en la terminal un par de lineas
-    2. Eleva la prioridad de la Tarea 2.
+### Estados en los que puede encontrarse una Tarea
 
-A continuacion, por que Task 1 elevo la tarea de Task 2, se ejecuta la tarea 2. La tarea 2 muestra unos mensajes en la terminal y disminuye su prioridad. Por lo tanto, a continuacion se corre la Tarea 1 y asi sucesivamente.
+- **RUNNING:** La tarea tiene el control del CPU y se está ejecutando.
+- **READY:** La tarea está lista para ejecutarse, esperando que el *scheduler* le asigne tiempo de CPU.
+- **BLOCKED:** La tarea está pausada, esperando un evento temporal (como un *delay*) o externo (como un semáforo o la llegada de datos).
+- **SUSPENDED:** Similar a *Blocked*, pero la tarea ignora cualquier evento. Solo puede salir de este estado si otra tarea llama explícitamente a `vTaskResume()`.
 
-Si ambas tareas tuviesen la misma prioridad, el scheduler les daria el mismo time-slice a ambas y
-se ejecutarian una atras de la otra respectivamente. Si no cambiasen su prioridad en ningun momento,
-la Task 1 seria ejecutada siempre provocando que el Thread 2 entre en inanicion.
+---
 
-### Cuales son los estados en los que puede encontrarse la Tarea?
+### ¿Cómo implementar Tareas?
 
-- RUNNING: cuando una tarea se esta ejecutando
-- READY: estado en el que la tarea esta lista para ser ejecutada.
-- BLOCKED: La tarea se encuentra esperando por un evento externo o temporal.
-- SUSPENDED: similar a BLOCKED pero solo puede salir de este estado si se llama a `vTaskResume()`.
-
-### Como implementar Tareas?
-
-Una tarea debe llevar la siguiente estructura:
+Una tarea en FreeRTOS debe seguir una estructura de *super-loop* (bucle infinito). Además, debe estar diseñada para ser orientada a eventos (*event-driven*) para ceder el procesador y evitar la inanición de otras tareas.
 
 ```c
-void vATaskFunction( void *pvParameters )
+void vATaskFunction(void *pvParameters)
 {
-    for( ;; )
+    // Código de inicialización de la tarea
+
+    for(;;)
     {
-        -- Task application code here. --
+        // Código de la aplicación de la tarea
     }
 
-    /* Tasks must not attempt to return from their implementing
-       function or otherwise exit. In newer FreeRTOS port
-       attempting to do so will result in an configASSERT() being
-       called if it is defined. If it is necessary for a task to
-       exit then have the task call vTaskDelete( NULL ) to ensure
-       its exit is clean. */
-    vTaskDelete( NULL );
+    /* 
+     * Las tareas nunca deben retornar de su función mediante "return". 
+     * Si por algún motivo una tarea debe finalizar, debe eliminarse 
+     * a sí misma llamando a vTaskDelete(NULL) para asegurar una salida limpia. 
+     */
+    vTaskDelete(NULL);
 }
 ```
 
-el tipo de funcion `TaskFunction_t` se define como una funcion que
-retorna `void` y toma como argumento un puntero a `void` como su
-unico parametro. Todas las funciones que implementan una tarea
-deben ser de este tipo. El parametro se utiliza para pasar cualquier
-tipo de informacion a la misma.
+El prototipo de la funcion (`TaskFunction_t`) debe retornar `void` y recibir un único parámetro de tipo `void*`.
+Este parámetro es sumamente útil para pasar estructuras de configuración a la tarea en el momento de su creación.
 
-Las tareas nunca deben retornar, por lo que se implementan como un
-`super-loop`. Estas tareas deben ser `event-driven` asi las otras
-tareas no entran en inanicion.
+### ¿Cómo crear una o más instancias de una Tarea?
 
-### Como crear una o mas instancias de una Tarea?
+Para instanciar tareas se utiliza la función `xTaskCreate()`. Aprovechando el parámetro `pvParameters`, podemos usar una misma función base para instanciar múltiples tareas con comportamientos distintos:
 
 ```c
-    // Estructura para pasar datos personalizados a cada instancia
-    typedef struct {
-        int task_id;
-        int delay_ms;
-    } task_config_t;
+// 1. Estructura para pasar datos personalizados a cada instancia
+typedef struct {
+    int task_id;
+    int delay_ms;
+} task_config_t;
 
-    // Función de la tarea (se usa para todas las instancias)
-    void vBlinkTask(void *pvParameters) {
-        // 1. Extraer y castear el parámetro recibido
-        task_config_t *config = (task_config_t *)pvParameters;
-        
-        printf("Iniciada Instancia %d\n", config->task_id);
+// 2. Función base de la tarea
+void vBlinkTask(void *pvParameters) {
+    // Extraer y castear el parámetro recibido
+    task_config_t *config = (task_config_t *)pvParameters;
+    
+    printf("Iniciada Instancia %d\n", config->task_id);
 
-        while (1) {
-            // Código de tu tarea
-            printf("Ejecutando Instancia %d\n", config->task_id);
-            vTaskDelay(config->delay_ms / portTICK_PERIOD_MS);
-        }
+    while (1) {
+        printf("Ejecutando Instancia %d\n", config->task_id);
+        vTaskDelay(pdMS_TO_TICKS(config->delay_ms)); // pdMS_TO_TICKS es la macro recomendada
     }
+}
 
-    // Configuración global de los parámetros para cada instancia
-    task_config_t config1 = { .task_id = 1, .delay_ms = 500 };
-    task_config_t config2 = { .task_id = 2, .delay_ms = 1000 };
+// 3. Configuración global (deben mantener su alcance de memoria durante la ejecución)
+task_config_t config1 = { .task_id = 1, .delay_ms = 500 };
+task_config_t config2 = { .task_id = 2, .delay_ms = 1000 };
 
-    xTaskCreate(ATask, "ATask_1", 1024, (void*)&config1, 1, NULL);
-    xTaskCreate(ATask, "ATask_2", 2048, (void*)&config2, 1, NULL);
+// 4. Creación de las instancias
+xTaskCreate(vBlinkTask, "Blink_1", 1024, (void*)&config1, 1, NULL);
+xTaskCreate(vBlinkTask, "Blink_2", 2048, (void*)&config2, 1, NULL);
 ```
 
-La tarea se instancia llamando a `xTaskCreate` como se puede observar
-en el ejemplo anterior. La funcion `xTaskCreate` toma los siguientes
-parametros:
+Los parámetros que recibe xTaskCreate son los siguientes:
+
+| Parámetro | Descripción |
+| --- | --- |
+| `pvTaskCode` | Puntero a la función que implementa la tarea (vBlinkTask). |
+| `pcName` | Nombre descriptivo (cadena de texto) utilizado exclusivamente para debugging. |
+| `uxStackDepth` | Tamaño del stack asignado a la tarea (en _words_, no en _bytes) |
+| `pvParameters` | Puntero a `void*` para pasar argumentos a la tarea al momento de su creación. |
+| `uxPriority` | Prioridad de la tarea |
+| `pxCreatedTask` | Puntero al _handle_ de la tarea para gestionarla luego (puede ser `NULL`) |
+
+
+
+### ¿Cómo eliminar una Tarea?
+
+Se elimina mediante la siguiente API, pasando el _handle_ de la tarea a destruir:
 
 ```c
- BaseType_t xTaskCreate( TaskFunction_t pvTaskCode, <----------------- funcion de la tarea
-                         const char * const pcName, <----------------- Nombre de la tarea, utilizado para debugging
-                         const configSTACK_DEPTH_TYPE uxStackDepth, <- tamaño del stack de la tarea en Words
-                         void *pvParameters, <------------------------ puntero a void que pasa cualquier tipo de informacion como parametro a la tarea
-                         UBaseType_t uxPriority, <-------------------- 
-                         TaskHandle_t *pxCreatedTask <---------------- handler de la task, que puede ser NULL
-                       );
+void vTaskDelete(TaskHandle_t xTask);
 ```
 
-### Como eliminar una tarea?
+(NOTA: Pasar `NULL` como argumento elimina la tarea desde la cual se está llamando a la función).
 
-Llamando a:
+## Experimentos realizados
+
+### Paso 3: Modificación de Prioridades
+
+Se evaluó el comportamiento del sistema al alterar las prioridades relativas:
+
+1. **Incremento de prioridad en `task_led`**: Solo se ejecutó la tarea `task_led`. El sistema entró en inanición respecto a otras entradas y dejó de responder a las pulsaciones del botón azul.
+2. **Incremento de prioridad en `task_btn`**: Solo se ejecutó la tarea task_btn. El sistema únicamente reportó los estados del botón por terminal, impidiendo que el LED titilara.
+3. **Restauración de prioridades**: Al igualar las prioridades a su estado original, el sistema recuperó la normalidad, compartiendo el tiempo de CPU mediante time-slicing.
+
+### Paso 4: Creación y Eliminación Dinámica
+
+Se instanciaron 3 tareas derivadas de `task_btn` y se configuró una condición para eliminar solo la tercera instancia desde el super-loop de `task_led`:
 
 ```c
-void vTaskDelete( TaskHandle_t xTask );
+if (h_task_btn_3 != NULL) {
+    vTaskDelete(h_task_btn_3);
+    h_task_btn_3 = NULL;
+}
 ```
 
-donde xTask es el handler de una tarea.
-
-## Paso 3
-
-Se realizaron tres experimentos:
-
-1- se incrementa la prioridad de `task_led`. En este caso, solo se ejecuta la tarea `task_led` y el sistema deja de responder ante las pulsaciones del boton azul.
-
-2- se incrementa la prioridad de `task_btn`. En este caso, solo se ejecuta la tarea `task_btn` y el sistema solamente muestra los estados de esta task por la terminal y el LED no titila.
-
-3- Se restauran ambas prioridades y el sistema vuelve a su normalidad.
-
-## Paso 4
-
-Al agregar las 3 tareas distintas de `task_btn` y eliminar una sola dentro del `super-loop` Tarea de `task_led`:
-
-```c
-    	if(h_task_btn_3 != NULL){
-    		vTaskDelete(h_task_btn_3);
-    		h_task_btn_3 = NULL;
-    	}
-```
-
-Se puede observar que a veces `Task BTN 2` llega a mostrar por la terminal que fue ejecutada compartiendo la funcionalidad con `Task BTN 1` como se puede observar en el siguiente log:
+Bajo esta condición, se observa que `Task BTN 2` llega a ejecutarse y reportar por terminal, compartiendo funcionalidad con `Task BTN 1`:
 
 ```
 [info]  Task BTN 1 - BTN HOVER
@@ -169,4 +159,4 @@ Se puede observar que a veces `Task BTN 2` llega a mostrar por la terminal que f
 [info]  Task LED - LED BLINK
 ```
 
-Por el otro lado, si eliminamos la guarda que verifica `h_task_btn_3` y no asignamos `NULL` a `h_task_btn_3`, se borran las tres tareas generadas de `task_btn` y solo se corre `task_led`.
+Por el contrario, si se omite la validación del puntero (la guarda `if(h_task_btn_3 != NULL)`) y no se asigna `NULL` al handle tras la eliminación, el comportamiento falla catastróficamente provocando que se borren las tres tareas generadas y dejando únicamente a `task_led` en ejecución.

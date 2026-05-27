@@ -335,3 +335,47 @@ Como regla general se da el segundo caso. La prioridad del consumidor es mayor q
 productor. Si el lector tiene menos prioridad, podria no ejecutarse a tiempo y causar
 que el sistema no funcione como se espera.
 
+
+## Paso 3
+
+Se realizarion las siguientes modificaciones:
+
+dentro de `task_btn_statechart` se reemplazo la llamada a `put_event_task_led(EV_LED_BLINK);`
+por enviar un mensaje a la cola usando:
+
+```
+    enum task_led_ev evt;
+
+...
+
+-       put_event_task_led(EV_LED_BLINK);
++       evt = EV_LED_BLINK;
++       xQueueSend(h_btn_led_q, &evt, portMAX_DELAY);
+
+...
+
+
+-       put_event_task_led(EV_LED_OFF);
++       evt = EV_LED_OFF;
++       xQueueSend(h_btn_led_q, &evt, portMAX_DELAY);
+
+```
+
+Algo similar se hizo en `task_led.c`, dentro de `task_led_statechart(void)` se lee la cola de mensajes:
+
+```
+	task_led_ev_t received_value;
+	if (ZERO != uxQueueMessagesWaiting(h_btn_led_q))
+	{
+		/* Recive an task_led_ev_t value. Don't block if the queue is
+		 * already empty. */
+		xQueueReceive(h_btn_led_q, &received_value, LED_TICK_DEL_ZERO);
+
+		task_led_dta.event = received_value;
+		task_led_dta.flag = true;
+	}
+```
+
+y se actualiza `task_led_dta`. Al compilar y ejecutar el codigo, se observa el mismo comportamiento que
+antes.
+

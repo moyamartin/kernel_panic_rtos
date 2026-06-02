@@ -80,7 +80,10 @@ void task_b(void *parameters)
 		xSemaphoreTake(h_items_counting_semaphore, portMAX_DELAY);
 		xSemaphoreTake(h_sync_mutex, portMAX_DELAY);
 		{
-			LOGGER_INFO("Get element from shared buffer");
+			uint8_t value = g_shared_buffer[g_buffer_tail];
+			LOGGER_INFO("Get element from shared buffer[%lu] = %d",
+						g_buffer_tail, value);
+			g_buffer_tail = (g_buffer_tail + 1ul) % G_BUFFER_SIZE;
 		}
 		xSemaphoreGive(h_sync_mutex);
 		xSemaphoreGive(h_spaces_counting_semaphore);

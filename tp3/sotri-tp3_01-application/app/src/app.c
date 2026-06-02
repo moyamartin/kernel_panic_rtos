@@ -43,6 +43,7 @@
 
 /* Application & Tasks includes */
 #include "board.h"
+#include "app.h"
 #include "app_it.h"
 #include "task_a.h"
 #include "task_b.h"
@@ -54,7 +55,6 @@
 #define G_TASK_IDLE_CNT_INI				0ul
 #define G_APP_STACK_OVERFLOW_CNT_INI	0ul
 #define G_TASKS_CNT_INI					0ul
-#define G_BUFFER_SIZE					10ul
 
 /********************** internal data declaration ****************************/
 
@@ -72,11 +72,15 @@ const char *p_app__	= "(Source => CESE - Sistemas Operativos de Tiempo Real)";
 /********************** external data declaration ****************************/
 uint32_t g_app_cnt;
 uint32_t g_app_task_cnt;
-uint32_t g_app_tick_cnt;
+volatile uint32_t g_app_tick_cnt;
 uint32_t g_task_idle_cnt;
 uint32_t g_app_stack_overflow_cnt;
 
 uint32_t g_tasks_cnt;
+
+uint8_t  g_shared_buffer[G_BUFFER_SIZE] = {0};
+uint32_t g_buffer_head = 0ul;
+uint32_t g_buffer_tail = 0ul;
 
 /* Declare a variable of type QueueHandle_t. This is used to reference queues*/
 

@@ -89,8 +89,10 @@ void task_a(void *parameters)
 		xSemaphoreTake(h_spaces_counting_semaphore, portMAX_DELAY);
 		xSemaphoreTake(h_sync_mutex, portMAX_DELAY);
 		{
-			// do whatever you want with the shared resource
-			LOGGER_INFO("Add element to shared buffer");
+			g_shared_buffer[g_buffer_head] = (uint8_t)g_task_a_cnt;
+			LOGGER_INFO("Add element to shared buffer[%lu] = %d (cnt: %lu)",
+						g_buffer_head, g_shared_buffer[g_buffer_head], g_task_a_cnt);
+			g_buffer_head = (g_buffer_head + 1ul) % G_BUFFER_SIZE;
 		}
 		xSemaphoreGive(h_sync_mutex);
 		xSemaphoreGive(h_items_counting_semaphore);

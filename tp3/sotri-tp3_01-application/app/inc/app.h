@@ -43,7 +43,8 @@ extern "C" {
 /********************** inclusions *******************************************/
 
 /********************** macros ***********************************************/
-#define TASK_QTY 2ul
+#define TASK_QTY		2ul
+#define G_BUFFER_SIZE	10ul
 
 /********************** typedef **********************************************/
 
@@ -53,6 +54,10 @@ extern uint32_t g_app_task_cnt;
 extern volatile uint32_t g_app_tick_cnt;
 extern uint32_t g_task_idle_cnt;
 extern uint32_t g_app_stack_overflow_cnt;
+
+extern uint8_t  g_shared_buffer[G_BUFFER_SIZE];
+extern uint32_t g_buffer_head;
+extern uint32_t g_buffer_tail;
 
 /* Declare a variable of type QueueHandle_t. This is used to reference queues*/
 

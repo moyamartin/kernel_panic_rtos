@@ -341,13 +341,29 @@ El esqueleto está listo para completar el **problema productor-consumidor**: fa
 
 ### 9.1 Cambios realizados sobre el scaffolding
 
-**`app.c` — creación de los objetos de sincronización**
+**`app.h` — macro de tamaño de buffer y variables compartidas**
 
-Se crearon los tres objetos que el patrón requiere:
+Se movió `G_BUFFER_SIZE` al header y se declararon las tres variables del buffer circular:
 
 ```c
-#define G_BUFFER_SIZE 10ul
+#define G_BUFFER_SIZE  10ul
 
+extern uint8_t  g_shared_buffer[G_BUFFER_SIZE];
+extern uint32_t g_buffer_head;   // índice de escritura (productor)
+extern uint32_t g_buffer_tail;   // índice de lectura  (consumidor)
+```
+
+**`app.c` — definición e inicialización**
+
+```c
+uint8_t  g_shared_buffer[G_BUFFER_SIZE] = {0};
+uint32_t g_buffer_head = 0ul;
+uint32_t g_buffer_tail = 0ul;
+```
+
+Se crearon los tres objetos de sincronización:
+
+```c
 h_spaces_counting_semaphore = xSemaphoreCreateCounting(G_BUFFER_SIZE, G_BUFFER_SIZE);
 h_items_counting_semaphore  = xSemaphoreCreateCounting(G_BUFFER_SIZE, 0ul);
 h_sync_mutex                = xSemaphoreCreateMutex();
@@ -363,7 +379,7 @@ h_sync_mutex                = xSemaphoreCreateMutex();
 
 **`task_a.c` — lógica de producción**
 
-Se reemplazó el bucle con `vTaskDelay` puro por la secuencia del productor:
+Dentro de la sección crítica se escribe `(uint8_t)g_task_a_cnt` en la posición `g_buffer_head` y se avanza el índice con aritmética modular:
 
 ```c
 vTaskDelay(TASK_A_DEL_MAX);                               // 250 ms entre producciones
@@ -371,21 +387,28 @@ vTaskDelay(TASK_A_DEL_MAX);                               // 250 ms entre produc
 xSemaphoreTake(h_spaces_counting_semaphore, portMAX_DELAY); // bloquea si buffer lleno
 xSemaphoreTake(h_sync_mutex, portMAX_DELAY);
 {
-    LOGGER_INFO("Add element to shared buffer");
+    g_shared_buffer[g_buffer_head] = (uint8_t)g_task_a_cnt;
+    LOGGER_INFO("Add element to shared buffer[%lu] = %d (cnt: %lu)",
+                g_buffer_head, g_shared_buffer[g_buffer_head], g_task_a_cnt);
+    g_buffer_head = (g_buffer_head + 1ul) % G_BUFFER_SIZE;
 }
 xSemaphoreGive(h_sync_mutex);
 xSemaphoreGive(h_items_counting_semaphore);               // señaliza ítem disponible
 ```
 
+El dato almacenado es `g_task_a_cnt` truncado a 8 bits: con `G_BUFFER_SIZE = 10` y el contador incrementando en 1 por iteración, los primeros 255 ciclos no pierden información; a partir del ítem 256 los valores vuelven a cero.
+
 **`task_b.c` — lógica de consumo**
 
-Se reemplazó el `vTaskDelay` por la espera sobre `items` y la devolución de espacio:
+Dentro de la sección crítica se lee `g_shared_buffer[g_buffer_tail]` y se avanza el índice:
 
 ```c
 xSemaphoreTake(h_items_counting_semaphore, portMAX_DELAY);  // bloquea si buffer vacío
 xSemaphoreTake(h_sync_mutex, portMAX_DELAY);
 {
-    LOGGER_INFO("Get element from shared buffer");
+    uint8_t value = g_shared_buffer[g_buffer_tail];
+    LOGGER_INFO("Get element from shared buffer[%lu] = %d", g_buffer_tail, value);
+    g_buffer_tail = (g_buffer_tail + 1ul) % G_BUFFER_SIZE;
 }
 xSemaphoreGive(h_sync_mutex);
 xSemaphoreGive(h_spaces_counting_semaphore);                // libera un espacio
@@ -394,24 +417,68 @@ vTaskDelay(TASK_B_DEL_MAX);                                 // 2500 ms de proces
 
 ### 9.2 Comportamiento observado
 
-El productor es 10× más rápido que el consumidor (`250 ms` vs `2500 ms`) y el buffer tiene capacidad `G_BUFFER_SIZE = 10`.
+#### Logs de ejecución
 
 ```
-t=   0 ms: spaces=10, items=0. Task B bloquea esperando ítems.
-t= 250 ms: A produce → spaces=9,  items=1.  B despierta, consume → spaces=10, items=0. B duerme 2500 ms.
-t= 500 ms: A produce → spaces=9,  items=1.  (B duerme)
-t= 750 ms: A produce → spaces=8,  items=2.
-t=1000 ms: A produce → spaces=7,  items=3.
+[info] app_init is running - Tick [mS] = 0
+[info]  app is a RTOS - Event-Triggered Systems (ETS)
+[info]  app is a sotri-tp3_01-application: Producer-Consumer
+[info]  app is a (Source => CESE - Sistemas Operativos de Tiempo Real)
+[info]
+[info]   Task B is running - Tick [mS] = 0
+[info]
+[info]   Task A is running - Tick [mS] = 0
+[info]    ==> Task    A - Wait:   250mS
+[info] Add element to shared buffer[0] = 1 (cnt: 1)
+[info]    ==> Task    A - Wait:   250mS
+[info] Get element from shared buffer[0] = 1
+[info]    ==> Task    B - Wait:   2500mS
+[info] Add element to shared buffer[1] = 2 (cnt: 2)
+[info]    ==> Task    A - Wait:   250mS
+[info] Add element to shared buffer[2] = 3 (cnt: 3)
+[info]    ==> Task    A - Wait:   250mS
+[info] Add element to shared buffer[3] = 4 (cnt: 4)
 ...
-t=2500 ms: A produce → spaces=1,  items=9.
-t=2750 ms: A produce → spaces=0,  items=10. ← A BLOQUEA en h_spaces_counting_semaphore
-           B despierta → consume → spaces=1, items=9. A desbloquea, produce → spaces=0, items=10.
-t=5250 ms: B despierta → consume → spaces=1, items=9. A desbloquea, produce → spaces=0, items=10.
-           (ciclo estable)
+[info] Add element to shared buffer[9] = 10 (cnt: 10)
+[info]    ==> Task    A - Wait:   250mS
+[info] Get element from shared buffer[1] = 2
+[info]    ==> Task    B - Wait:   2500mS
+[info] Add element to shared buffer[0] = 11 (cnt: 11)
+[info]    ==> Task    A - Wait:   250mS
+...
 ```
+
+#### Análisis de fases
+
+**Fase 1 — arranque (t = 0):**
+Task B arranca primero y bloquea de inmediato en `xSemaphoreTake(h_items_counting_semaphore)` porque `items = 0`. Task A arranca y entra a su loop.
+
+**Fase 2 — primer ciclo (t = 250 ms):**
+Task A produce `buffer[0] = 1` → `items = 1`. Task B despierta, consume `buffer[0] = 1`, libera espacio (`spaces = 10`) y se duerme 2500 ms.
+
+**Fase 3 — llenado del buffer (t = 500 ms … 2750 ms):**
+Task B está durmiendo. Task A produce un ítem cada 250 ms sin bloqueos: llena posiciones `[1]` a `[9]` con valores 2 a 10. Al intentar depositar el ítem 11 (`cnt = 11`) encuentra `spaces = 0` y **bloquea**.
+
+**Fase 4 — régimen permanente (t ≥ 2750 ms):**
+Cada vez que Task B despierta (cada 2500 ms), consume un ítem y libera un espacio. Task A se desbloquea, deposita su ítem pendiente, y vuelve a bloquear al intentar el siguiente (el buffer vuelve a llenarse de inmediato).
+
+```
+t=   0 ms: spaces=10, items=0. B bloquea.
+t= 250 ms: A → buffer[0]=1,  spaces=9,  items=1.  B consume buffer[0]=1 → spaces=10, items=0. B duerme.
+t= 500 ms: A → buffer[1]=2,  spaces=9,  items=1.
+t= 750 ms: A → buffer[2]=3,  spaces=8,  items=2.
+...
+t=2500 ms: A → buffer[9]=10, spaces=0,  items=10. ← A BLOQUEA
+t=2750 ms: B despierta → consume buffer[1]=2 → spaces=1, items=9.
+           A desbloquea → buffer[0]=11, spaces=0, items=10. A vuelve a bloquear.
+t=5250 ms: B despierta → consume buffer[2]=3 → spaces=1, items=9.
+           A desbloquea → buffer[1]=12, spaces=0, items=10. (ciclo estable)
+```
+
+**El buffer opera como una cola FIFO circular.** `g_buffer_head` y `g_buffer_tail` avanzan por separado, cada uno módulo `G_BUFFER_SIZE`. El consumidor siempre lee el dato más antiguo (`tail`); el productor escribe en la próxima posición libre (`head`).
 
 En régimen permanente:
 - El buffer se mantiene **lleno** (`spaces == 0`).
-- El productor queda **bloqueado** en `xSemaphoreTake(h_spaces_counting_semaphore)` hasta que el consumidor libera un espacio cada 2500 ms.
+- El productor queda **bloqueado** en `xSemaphoreTake(h_spaces_counting_semaphore)` hasta que el consumidor libera un espacio.
 - El consumidor **nunca bloquea** en `items` una vez que el buffer está lleno.
-- La cadencia efectiva del productor pasa de 250 ms a 2500 ms, igualando al consumidor: la velocidad del sistema queda limitada por el eslabón más lento.
+- La cadencia efectiva del productor pasa de 250 ms a 2500 ms: la velocidad del sistema queda limitada por el eslabón más lento.

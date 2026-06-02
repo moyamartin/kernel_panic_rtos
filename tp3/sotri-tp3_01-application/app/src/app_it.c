@@ -35,6 +35,7 @@
 /********************** inclusions *******************************************/
 /* Project includes */
 #include "main.h"
+#include "cmsis_os.h"
 
 /* Demo includes */
 #include "logger.h"
@@ -52,7 +53,7 @@
 /********************** internal data definition *****************************/
 
 /********************** external data declaration ****************************/
-
+extern SemaphoreHandle_t h_event_binary_semaphore;
 /********************** external functions definition ************************/
 void app_it_init(void)
 {
@@ -62,6 +63,24 @@ void app_it_init(void)
 	__asm("CPSID i");	/* disable interrupts */
 
 	__asm("CPSIE i");	/* enable interrupts */
+}
+
+/**
+  * @brief  EXTI line detection callbacks.
+  * @param  GPIO_Pin Specifies the pins connected EXTI line
+  * @retval None
+  */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+
+	// Check which version of the gpio triggered this callback
+	if (GPIO_Pin == BTN_A_PIN)
+	{
+		BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+		xSemaphoreGiveFromISR(h_event_binary_semaphore, &xHigherPriorityTaskWoken);
+		portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+		/* Work to be done. */
+	}
 }
 
 /********************** end of file ******************************************/

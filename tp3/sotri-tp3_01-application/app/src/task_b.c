@@ -56,7 +56,7 @@
 /********************** internal functions declaration ***********************/
 
 /********************** internal data definition *****************************/
-const char *p_task_b_wait_250mS			= "   ==> Task    B - Wait:   250mS";
+const char *p_task_b_wait_2500mS			= "   ==> Task    B - Wait:   2500mS";
 
 /********************** external data declaration ****************************/
 uint32_t g_task_b_cnt;
@@ -77,14 +77,14 @@ void task_b(void *parameters)
     {
 		/* Update Task Counter */
 		g_task_b_cnt++;
-		xSemaphoreTake(h_items_binary_semaphore, portMAX_DELAY);
+		xSemaphoreTake(h_items_counting_semaphore, portMAX_DELAY);
 		xSemaphoreTake(h_sync_mutex, portMAX_DELAY);
 		{
-			LOGGER_INFO("Process event from shared buffer");
+			LOGGER_INFO("Get element from shared buffer");
 		}
 		xSemaphoreGive(h_sync_mutex);
 		xSemaphoreGive(h_spaces_counting_semaphore);
-		/* Print out: Wait 250mS. This should process the event */
+		/* Print out: Wait 2500mS. This should process the event */
 		LOGGER_INFO(p_task_b_wait_2500mS);
 		vTaskDelay(TASK_B_DEL_MAX);
 	}

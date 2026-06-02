@@ -84,8 +84,9 @@ uint32_t g_tasks_cnt;
  * This is used to reference the semaphore that is used to synchronize a thread
  * with other thread or to ensure mutual exclusive access to...*/
 SemaphoreHandle_t h_spaces_counting_semaphore;
-SemaphoreHandle_t h_items_binary_semaphore;
+SemaphoreHandle_t h_items_counting_semaphore;
 SemaphoreHandle_t h_sync_mutex;
+SemaphoreHandle_t h_event_binary_semaphore;
 
 /* Declare a variable of type TaskHandle_t. This is used to reference threads. */
 TaskHandle_t h_task_a;
@@ -122,13 +123,17 @@ void app_init(void)
 	configASSERT(NULL != h_spaces_counting_semaphore);
 	vQueueAddToRegistry(h_spaces_counting_semaphore, "Items available Binary Semaphore Handle");
 
-	h_items_binary_semaphore = xSemaphoreCreateBinary();
-	configASSERT(NULL != h_items_binary_semaphore);
-	vQueueAddToRegistry(h_items_binary_semaphore, "Items available Binary Semaphore Handle");
+	h_items_counting_semaphore = xSemaphoreCreateCounting(G_BUFFER_SIZE, 0ul);
+	configASSERT(NULL != h_items_counting_semaphore);
+	vQueueAddToRegistry(h_items_counting_semaphore, "Items available Counting Semaphore Handle");
 
 	h_sync_mutex = xSemaphoreCreateMutex();
 	configASSERT(NULL != h_sync_mutex);
 	vQueueAddToRegistry(h_sync_mutex, "Task A/Task B mutex handle");
+
+	h_event_binary_semaphore = xSemaphoreCreateBinary();
+	configASSERT(NULL != h_event_binary_semaphore);
+	vQueueAddToRegistry(h_event_binary_semaphore, "Task A event from interrupt");
 
 	/* Add threads, ... */
     BaseType_t ret;

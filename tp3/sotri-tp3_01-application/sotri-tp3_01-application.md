@@ -334,3 +334,84 @@ t=2500 ms: Task B despierta → cuenta, imprime → vTaskDelay(2500 ms)
 - **`freertos.c`**: instrumenta el sistema mediante los hooks de *idle* (carga de CPU), *tick* (tiempo real) y *stack overflow* (detención segura ante error).
 
 El esqueleto está listo para completar el **problema productor-consumidor**: falta crear la cola y/o el semáforo en `app_init()` y reemplazar los `vTaskDelay` de las tareas por las operaciones de envío (`xQueueSend`/`xSemaphoreGive`) y recepción (`xQueueReceive`/`xSemaphoreTake`) que las sincronicen.
+
+---
+
+## 9. Implementación del patrón productor-consumidor
+
+### 9.1 Cambios realizados sobre el scaffolding
+
+**`app.c` — creación de los objetos de sincronización**
+
+Se crearon los tres objetos que el patrón requiere:
+
+```c
+#define G_BUFFER_SIZE 10ul
+
+h_spaces_counting_semaphore = xSemaphoreCreateCounting(G_BUFFER_SIZE, G_BUFFER_SIZE);
+h_items_counting_semaphore  = xSemaphoreCreateCounting(G_BUFFER_SIZE, 0ul);
+h_sync_mutex                = xSemaphoreCreateMutex();
+```
+
+| Handle | Tipo | Máximo | Valor inicial | Rol |
+|--------|------|--------|---------------|-----|
+| `h_spaces_counting_semaphore` | Semáforo contador | 10 | **10** | Espacios libres en el buffer |
+| `h_items_counting_semaphore` | Semáforo contador | 10 | **0** | Ítems disponibles para consumir |
+| `h_sync_mutex` | Mutex | — | disponible | Exclusión mutua sobre el buffer |
+
+> **Por qué `items` es semáforo contador y no binario:** el productor (más rápido) acumula varios ítems en el buffer antes de que el consumidor procese el primero. Con semáforo binario, los `xSemaphoreGive` adicionales se descartan silenciosamente y el consumidor perdería ítems. El semáforo contador acumula hasta `G_BUFFER_SIZE` señales pendientes, una por ítem depositado.
+
+**`task_a.c` — lógica de producción**
+
+Se reemplazó el bucle con `vTaskDelay` puro por la secuencia del productor:
+
+```c
+vTaskDelay(TASK_A_DEL_MAX);                               // 250 ms entre producciones
+
+xSemaphoreTake(h_spaces_counting_semaphore, portMAX_DELAY); // bloquea si buffer lleno
+xSemaphoreTake(h_sync_mutex, portMAX_DELAY);
+{
+    LOGGER_INFO("Add element to shared buffer");
+}
+xSemaphoreGive(h_sync_mutex);
+xSemaphoreGive(h_items_counting_semaphore);               // señaliza ítem disponible
+```
+
+**`task_b.c` — lógica de consumo**
+
+Se reemplazó el `vTaskDelay` por la espera sobre `items` y la devolución de espacio:
+
+```c
+xSemaphoreTake(h_items_counting_semaphore, portMAX_DELAY);  // bloquea si buffer vacío
+xSemaphoreTake(h_sync_mutex, portMAX_DELAY);
+{
+    LOGGER_INFO("Get element from shared buffer");
+}
+xSemaphoreGive(h_sync_mutex);
+xSemaphoreGive(h_spaces_counting_semaphore);                // libera un espacio
+vTaskDelay(TASK_B_DEL_MAX);                                 // 2500 ms de procesamiento
+```
+
+### 9.2 Comportamiento observado
+
+El productor es 10× más rápido que el consumidor (`250 ms` vs `2500 ms`) y el buffer tiene capacidad `G_BUFFER_SIZE = 10`.
+
+```
+t=   0 ms: spaces=10, items=0. Task B bloquea esperando ítems.
+t= 250 ms: A produce → spaces=9,  items=1.  B despierta, consume → spaces=10, items=0. B duerme 2500 ms.
+t= 500 ms: A produce → spaces=9,  items=1.  (B duerme)
+t= 750 ms: A produce → spaces=8,  items=2.
+t=1000 ms: A produce → spaces=7,  items=3.
+...
+t=2500 ms: A produce → spaces=1,  items=9.
+t=2750 ms: A produce → spaces=0,  items=10. ← A BLOQUEA en h_spaces_counting_semaphore
+           B despierta → consume → spaces=1, items=9. A desbloquea, produce → spaces=0, items=10.
+t=5250 ms: B despierta → consume → spaces=1, items=9. A desbloquea, produce → spaces=0, items=10.
+           (ciclo estable)
+```
+
+En régimen permanente:
+- El buffer se mantiene **lleno** (`spaces == 0`).
+- El productor queda **bloqueado** en `xSemaphoreTake(h_spaces_counting_semaphore)` hasta que el consumidor libera un espacio cada 2500 ms.
+- El consumidor **nunca bloquea** en `items` una vez que el buffer está lleno.
+- La cadencia efectiva del productor pasa de 250 ms a 2500 ms, igualando al consumidor: la velocidad del sistema queda limitada por el eslabón más lento.

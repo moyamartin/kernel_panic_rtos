@@ -78,6 +78,10 @@ void task_a(void *parameters)
 		/* Update Task Counter */
 		g_task_a_cnt++;
 
+    	/* Print out: Wait 250mS */
+		LOGGER_INFO(p_task_a_wait_250mS);
+		vTaskDelay(TASK_A_DEL_MAX);
+
 		/// this will only block when there are no more spaces left
 		/// so at first it will fill all the buffer, once filled
 		/// it will block and wait for the consumer to start processing
@@ -89,10 +93,8 @@ void task_a(void *parameters)
 			LOGGER_INFO("Add element to shared buffer");
 		}
 		xSemaphoreGive(h_sync_mutex);
-		xSemaphoreGive(h_items_binary_semaphore);
-    	/* Print out: Wait 250mS */
-		LOGGER_INFO(p_task_a_wait_250mS);
-		vTaskDelay(TASK_A_DEL_MAX);
+		xSemaphoreGive(h_items_counting_semaphore);
+
 	}
 }
 

@@ -60,9 +60,9 @@ extern uint32_t g_app_stack_overflow_cnt;
  * This is used to reference the semaphore that is used to synchronize a thread
  * with other thread or to ensure mutual exclusive access to...*/
 extern SemaphoreHandle_t h_spaces_counting_semaphore;
-extern SemaphoreHandle_t h_items_binary_semaphore;
+extern SemaphoreHandle_t h_items_counting_semaphore;
 extern SemaphoreHandle_t h_sync_mutex;
-
+extern SemaphoreHandle_t h_event_binary_semaphore;
 
 /* Declare a variable of type TaskHandle_t. This is used to reference threads. */
 extern TaskHandle_t h_task_a;

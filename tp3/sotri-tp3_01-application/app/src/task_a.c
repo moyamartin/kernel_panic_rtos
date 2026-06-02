@@ -78,6 +78,18 @@ void task_a(void *parameters)
 		/* Update Task Counter */
 		g_task_a_cnt++;
 
+		/// this will only block when there are no more spaces left
+		/// so at first it will fill all the buffer, once filled
+		/// it will block and wait for the consumer to start processing
+		/// them.
+		xSemaphoreTake(h_spaces_counting_semaphore, portMAX_DELAY);
+		xSemaphoreTake(h_sync_mutex, portMAX_DELAY);
+		{
+			// do whatever you want with the shared resource
+			LOGGER_INFO("Add element to shared buffer");
+		}
+		xSemaphoreGive(h_sync_mutex);
+		xSemaphoreGive(h_items_binary_semaphore);
     	/* Print out: Wait 250mS */
 		LOGGER_INFO(p_task_a_wait_250mS);
 		vTaskDelay(TASK_A_DEL_MAX);

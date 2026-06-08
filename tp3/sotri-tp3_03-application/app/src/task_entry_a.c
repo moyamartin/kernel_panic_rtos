@@ -72,6 +72,19 @@ void task_entry_a(void *parameters)
 	LOGGER_INFO(" ");
 	LOGGER_INFO("  %s is running - Tick [mS] = %lu", pcTaskGetName(NULL), xTaskGetTickCount());
 
+	/* Take the semaphore once to start with so the semaphore is empty before the
+	 * infinite loop is entered.  The semaphore was created before the scheduler
+	 * was started so before this task ran for the first time.*/
+	xSemaphoreTake(h_entry_a_bin_sem, (portTickType) 0);	// h_entry_a_bin_sem = Semaphore(0)
+	xSemaphoreTake(h_entry_b_bin_sem, (portTickType) 0);	// h_entry_b_bin_sem = Semaphore(0)
+
+	/* Setting the priority of Task A above the priority of other tasks will
+	 * cause Task A to start executing immediately, allowing it to put the
+	 * semaphores into the initial state required by the application, and then
+	 * regain the same priority of other tasks. */
+	kPrioritySet(h_task_entry_a, (uxTaskPriorityGet(h_task_entry_b)));
+
+
 	/* As per most tasks, this task is implemented in an infinite loop. */
 	for (;;)
 	{
@@ -90,8 +103,10 @@ void task_entry_a(void *parameters)
 						semaforo_a = 0;
 						LOGGER_INFO("Semaforo A en rojo");
 					}
-					semaforo_b = 0;
-					LOGGER_INFO("Semaforo B en rojo");
+					if(semaforo_b == 1) {
+						semaforo_b = 0;
+						LOGGER_INFO("Semaforo B en rojo");
+					}
 				}
 			}
 			xSemaphoreGive(h_mutex_mut_sem);

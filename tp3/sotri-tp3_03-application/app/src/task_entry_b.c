@@ -84,15 +84,20 @@ void task_entry_b(void *parameters)
 			{
 				if(g_tasks_cnt < G_TASKS_CNT_MAX && semaforo_b == 1) {
 					LOGGER_INFO("Vehiculo Circulando por B");
+
 					g_tasks_cnt++;
 					if(g_tasks_cnt == G_TASKS_CNT_MAX) {
 						semaforo_b = 0;
 						LOGGER_INFO("Semaforo B en rojo");
 					}
+
 					// como le estoy dando paso a un auto, tengo que poner
 					// el semaforo opuesto en rojo si o si
-					semaforo_a = 0;
-					LOGGER_INFO("Semaforo A en rojo");
+					if(semaforo_a == 1)
+					{
+						semaforo_a = 0;
+						LOGGER_INFO("Semaforo A en rojo");
+					}
 				}
 			}
 			xSemaphoreGive(h_mutex_mut_sem);

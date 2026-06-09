@@ -230,3 +230,106 @@ Las secuencias de estímulo se seleccionan con `E_TASK_TEST_X` en `task_test.c`.
 ## 8.2. Conclusión
 
 Las trazas validan el modelo de §7: capacidad limitada a 3, exclusión del sentido opuesto (B en rojo mientras circula A), liberación del cruce al vaciarse, **rechazo de ingresos cuando está lleno** y **protección ante egresos sin vehículo** (anti-underflow). Queda pendiente, si la cátedra lo pide, ejercitar el sentido B y/o implementar la **espera** real del vehículo rechazado (re-encolado) en lugar de su descarte.
+
+---
+
+# 9. Mecanismo de sincronización entre `task_test` y las tareas de evento
+
+> Las secciones 7 y 8 describen *qué* hace la lógica del cruce. Esta sección documenta *cómo* se sincronizan las tareas: el flujo de señalización productor/consumidor que conecta `task_test` con `task_entry_a`, `task_exit_a`, `task_entry_b` y `task_exit_b`.
+
+## 9.1. Primitivas involucradas
+
+El mecanismo se apoya en **dos clases de primitivas**, con roles distintos:
+
+| Primitiva | Tipo | Rol en la sincronización |
+|---|---|---|
+| `h_entry_a_bin_sem`, `h_exit_a_bin_sem`, `h_entry_b_bin_sem`, `h_exit_b_bin_sem` | semáforo binario | **Señalización de eventos** (event-triggering). Acoplan 1 a 1 cada evento de `task_test` con su tarea consumidora. |
+| `h_mutex_mut_sem` | mutex | **Exclusión mutua** sobre el estado compartido (`g_tasks_cnt`, `semaforo_a`, `semaforo_b`). |
+
+Todas se crean en `app_init()` (`app.c`) **antes** de arrancar el scheduler:
+- los cuatro binarios con `xSemaphoreCreateBinary()` — nacen **vacíos** (tomar bloquea hasta que alguien dé);
+- el mutex con `xSemaphoreCreateMutex()` — nace **disponible**.
+
+Cada uno se registra con `vQueueAddToRegistry()` para facilitar la depuración (visible por nombre en el visor de RTOS). Nótese que `h_capacity_count_sem` está declarado pero **no se crea ni se usa**: es un vestigio de la idea descartada del semáforo contador (ver §7.2).
+
+## 9.2. Patrón productor/consumidor
+
+La sincronización es un patrón **productor único / consumidores dedicados** sobre semáforos binarios usados como *señales de evento* (no como locks):
+
+- **Productor:** `task_test`. En cada iteración recorre `e_task_test_array` y, según el evento, hace **`xSemaphoreGive(...)`** sobre el binario correspondiente. *Da* la señal y sigue; no espera respuesta.
+- **Consumidores:** las cuatro tareas de evento. Cada una está bloqueada en **`xSemaphoreTake(<su binario>, portMAX_DELAY)`** y solo se despierta cuando `task_test` da *ese* semáforo.
+
+Correspondencia evento → semáforo → tarea (en el `switch` de `task_test.c`):
+
+| Evento (`e_task_test_t`) | `task_test` ejecuta | Despierta a |
+|---|---|---|
+| `Entry_A` | `xSemaphoreGive(h_entry_a_bin_sem)` | `task_entry_a` |
+| `Exit_A`  | `xSemaphoreGive(h_exit_a_bin_sem)`  | `task_exit_a`  |
+| `Entry_B` | `xSemaphoreGive(h_entry_b_bin_sem)` | `task_entry_b` |
+| `Exit_B`  | `xSemaphoreGive(h_exit_b_bin_sem)`  | `task_exit_b`  |
+| `Error` / `default` | — (solo loguea error) | ninguna |
+
+Esto convierte a las tareas en **event-triggered**: ya no despiertan solas por tiempo (como en el esqueleto de §3), sino que permanecen bloqueadas en su `Take` hasta recibir la señal. El `vTaskDelay(2500ms)` que conservan al final del lazo es un *retardo de servicio* (simula la duración de la maniobra), no el disparador del trabajo.
+
+## 9.3. Anatomía de una tarea consumidora
+
+Las cuatro consumidoras comparten la misma estructura de dos niveles de bloqueo anidados (ej. `task_entry_a`):
+
+```c
+for (;;) {
+    g_task_entry_a_cnt++;
+
+    xSemaphoreTake(h_entry_a_bin_sem, portMAX_DELAY);   /* (1) espera el EVENTO */
+    {
+        xSemaphoreTake(h_mutex_mut_sem, portMAX_DELAY); /* (2) toma el LOCK     */
+        {
+            /* sección crítica: lee/modifica g_tasks_cnt, semaforo_a, semaforo_b */
+        }
+        xSemaphoreGive(h_mutex_mut_sem);                /* libera el LOCK       */
+    }
+    LOGGER_INFO(...);
+    vTaskDelay(TASK_ENTRY_A_DEL_MAX);                   /* retardo de servicio  */
+}
+```
+
+Los dos `Take` cumplen funciones **completamente distintas**:
+1. **`h_entry_a_bin_sem` (señal de evento):** sincroniza *temporalmente* la tarea con `task_test`. Mientras no haya evento, la tarea no consume CPU (bloqueada). Cada `Give` habilita exactamente **una** vuelta del lazo (el binario satura en 1: dos `Give` seguidos sin `Take` intermedio se colapsan en un solo evento — relevante para entender por qué los eventos deben espaciarse 5 s).
+2. **`h_mutex_mut_sem` (lock):** garantiza que la actualización de `g_tasks_cnt` + luces sea **atómica** frente a las otras tres tareas de evento. Sin él, dos tareas que despertaran "a la vez" podrían intercalar lectura/escritura y romper el invariante de §7.5.
+
+`task_exit_a/b` siguen el mismo patrón pero sin la condición de capacidad: tras tomar su binario y el mutex, decrementan y reabren luces (§7.4).
+
+## 9.4. Secuencia de arranque e inicialización de los semáforos
+
+Hay un detalle de inicialización en `task_entry_a` (ver commit *"inicializa semaforos en task_entry_a"*) que normaliza el estado antes del régimen permanente:
+
+```c
+xSemaphoreTake(h_entry_a_bin_sem, 0);   /* deja el binario en 0 (vacío) */
+xSemaphoreTake(h_entry_b_bin_sem, 0);   /* idem para B */
+```
+
+Se ejecutan **una sola vez**, antes del `for(;;)`, con timeout `0` (no bloqueante): aseguran que ambos semáforos de entrada arranquen **vacíos** aunque algún evento espurio se hubiera señalizado durante el arranque, de modo que la primera vez que una tarea de entrada corre lo haga *solo* por un `Give` real de `task_test`. Tras eso, `task_entry_a` reajusta su prioridad a la de `task_entry_b` para que ambas vías queden en igualdad de condiciones.
+
+> Nota: como los binarios ya nacen vacíos de `xSemaphoreCreateBinary()`, estos `Take` iniciales son **defensivos/idempotentes** (patrón heredado del esqueleto FreeRTOS). No cambian el resultado en el flujo normal, pero documentan explícitamente la precondición "semáforos vacíos al entrar al lazo".
+
+## 9.5. Diagrama del flujo de señalización
+
+```
+        task_test  (productor, período 5 s, prioridad +3)
+            │  recorre e_task_test_array
+            │  switch(evento) → xSemaphoreGive(...)
+            ├───────────────┬───────────────┬───────────────┐
+            ▼               ▼               ▼               ▼
+   h_entry_a_bin_sem  h_exit_a_bin_sem  h_entry_b_bin_sem  h_exit_b_bin_sem
+            │               │               │               │   (semáforos binarios = señales)
+        Take▼           Take▼           Take▼           Take▼
+     task_entry_a    task_exit_a     task_entry_b    task_exit_b   (consumidores, bloqueados en Take)
+            │               │               │               │
+            └───────────────┴───────┬───────┴───────────────┘
+                                     ▼
+                          Take ──► h_mutex_mut_sem ──► Give     (exclusión mutua)
+                                     │
+                                     ▼
+                   sección crítica: g_tasks_cnt, semaforo_a, semaforo_b
+```
+
+**Resumen del mecanismo:** `task_test` actúa como *fuente de eventos* y desacopla la generación del estímulo de su procesamiento mediante cuatro semáforos binarios (uno por evento), cada uno con una única tarea consumidora dedicada que espera bloqueada en él. Una vez despierta, la consumidora serializa su acceso al estado compartido del cruce con un único mutex (`h_mutex_mut_sem`), garantizando atomicidad e integridad del invariante (§7.5). Es una combinación clásica de **señalización binaria para sincronización temporal** + **mutex para sincronización de datos**.
